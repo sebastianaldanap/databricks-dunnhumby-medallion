@@ -1,0 +1,72 @@
+# Workflow del pipeline Medallion: setup -> ingesta Kaggle -> bronze -> silver -> gold -> catálogo de datos.
+# Las tareas no declaran clúster, así que corren en cómputo serverless (el disponible en Free Edition).
+resources:
+  jobs:
+    pipeline_medallion:
+      name: dunnhumby_pipeline_medallion
+      description: >-
+        Del ticket al cliente: carga los CSV de Dunnhumby en Bronze, limpia e incrementa Silver con MERGE por día,
+        calcula las tablas Gold de las 4 preguntas de negocio y documenta todo en Unity Catalog.
+
+      # Parámetros del Job: Databricks los pasa a los widgets de los notebooks (02_silver los usa)
+      parameters:
+        - name: dia_hasta
+          default: "711"   # último día que se procesa; un valor menor simula que los días siguientes aún no llegan
+        - name: dias_reproceso
+          default: "0"     # días ya cargados que se vuelven a procesar (datos tardíos)
+        - name: dataset_kaggle
+          default: frtgnn/dunnhumby-the-complete-journey   # dataset público de Kaggle que usa 00b_ingesta_kaggle
+
+      # Una sola corrida a la vez: dos MERGE simultáneos sobre las mismas tablas podrían chocar
+      max_concurrent_runs: 1
+
+      # Carga diaria a las 6:00 a. m. hora Perú; queda en pausa para ejecutarla a mano en la demo
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"
+        timezone_id: America/Lima
+        pause_status: PAUSED
+
+      tasks:
+        - task_key: setup_unity_catalog
+          description: Crea (si no existen) el catálogo, los esquemas bronze/silver/gold y el Volume de archivos crudos
+          notebook_task:
+            notebook_path: ../notebooks/00_setup_unity_catalog.ipynb
+
+        - task_key: ingesta_kaggle
+          description: Descarga desde Kaggle los 7 CSV del proyecto al Volume raw_files
+          depends_on:
+            - task_key: setup_unity_catalog
+          notebook_task:
+            notebook_path: ../notebooks/00b_ingesta_kaggle.ipynb
+
+        - task_key: bronze
+          description: Carga completa de los 7 CSV del Volume a tablas Delta de bronze
+          depends_on:
+            - task_key: ingesta_kaggle
+          notebook_task:
+            notebook_path: ../notebooks/01_bronze.ipynb
+
+        - task_key: silver
+          description: Limpieza, cuarentena y MERGE incremental por día hacia silver
+          depends_on:
+            - task_key: bronze
+          notebook_task:
+            notebook_path: ../notebooks/02_silver.ipynb
+
+        - task_key: gold
+          description: Tablas de las 4 preguntas de negocio con MERGE en gold
+          depends_on:
+            - task_key: silver
+          notebook_task:
+            notebook_path: ../notebooks/03_gold.ipynb
+
+        - task_key: catalogo_datos
+          description: Comentarios de tablas y columnas en Unity Catalog y verificación del catálogo
+          depends_on:
+            - task_key: gold
+          notebook_task:
+            notebook_path: ../notebooks/04_catalogo_datos.ipynb
+
+      tags:
+        proyecto: del_ticket_al_cliente
+        arquitectura: medallion

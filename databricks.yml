@@ -1,0 +1,13 @@
+# Bundle del proyecto: define como código el Workflow que orquesta la arquitectura Medallion.
+# Despliegue: desde la carpeta Git del workspace (botón Deploy) o con la CLI: databricks bundle deploy -t dev
+bundle:
+  name: dunnhumby_medallion
+
+include:
+  - resources/*.yml
+
+targets:
+  dev:
+    # development: el Job se crea con el prefijo [dev usuario] y su programación queda en pausa
+    mode: development
+    default: true
